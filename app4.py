@@ -23,8 +23,8 @@ def get_team_abbreviation(team_name):
             return team['abbreviation']
     return None
 
-# Fetch player game logs against a specific team
-def get_game_logs_against_opponent(player_name, opponent_team, last_n_games=10):
+# Fetch player game logs for the last 3 seasons against a specific team
+def get_game_logs_against_opponent(player_name, opponent_team, last_n_seasons=3):
     player_id = get_player_id(player_name)
     opponent_abbr = get_team_abbreviation(opponent_team)
 
@@ -36,17 +36,29 @@ def get_game_logs_against_opponent(player_name, opponent_team, last_n_games=10):
         st.warning(f"⚠️ Team '{opponent_team}' not found! Check the name.")
         return None
 
-    gamelog = PlayerGameLog(player_id=player_id)
-    df = gamelog.get_data_frames()[0]
-    
-    # Extract opponent and location
-    df["LOCATION"] = df["MATCHUP"].apply(lambda x: "Home" if " vs. " in x else "Away")
-    df["OPPONENT"] = df["MATCHUP"].apply(lambda x: x.split(" vs. ")[-1] if " vs. " in x else x.split(" @ ")[-1])
+    all_seasons_data = []
 
-    # Filter for games against the specified opponent
-    df = df[df["OPPONENT"] == opponent_abbr]
+    # Fetch data for the last 3 seasons
+    current_season = 2023  # Update this dynamically if needed
+    for season in range(current_season, current_season - last_n_seasons, -1):
+        gamelog = PlayerGameLog(player_id=player_id, season=f"{season}-{str(season+1)[-2:]}")
+        df = gamelog.get_data_frames()[0]
 
-    return df.head(last_n_games)
+        # Extract opponent and location
+        df["LOCATION"] = df["MATCHUP"].apply(lambda x: "Home" if " vs. " in x else "Away")
+        df["OPPONENT"] = df["MATCHUP"].apply(lambda x: x.split(" vs. ")[-1] if " vs. " in x else x.split(" @ ")[-1])
+
+        # Filter for games against the selected opponent
+        df = df[df["OPPONENT"] == opponent_abbr]
+
+        all_seasons_data.append(df)
+
+    # Combine all seasons' data into one DataFrame
+    if all_seasons_data:
+        final_df = pd.concat(all_seasons_data, ignore_index=True)
+        return final_df
+    else:
+        return None
 
 # AI Prediction Model
 def predict_next_game(df):
@@ -89,7 +101,7 @@ def plot_performance_graphs(df, player_name, opponent_team):
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
     df = df[::-1]
     df[['PTS', 'REB', 'AST']] = df[['PTS', 'REB', 'AST']].apply(pd.to_numeric)
-    df["Game Label"] = df["GAME_DATE"].dt.strftime('%b %d') + " (" + df["LOCATION"] + ")"
+    df["Game Label"] = df["GAME_DATE"].dt.strftime('%b %d, %Y') + " (" + df["LOCATION"] + ")"
 
     avg_pts, avg_reb, avg_ast = df["PTS"].mean(), df["REB"].mean(), df["AST"].mean()
     colors_pts = ["#4CAF50" if pts > avg_pts else "#2196F3" for pts in df["PTS"]]
@@ -116,11 +128,12 @@ def plot_performance_graphs(df, player_name, opponent_team):
     fig.add_trace(go.Bar(x=df["Game Label"], y=df["PRA"], marker=dict(color=colors_pra)), row=2, col=2)
     fig.add_hline(y=avg_pra, line_dash="dash", line_color="gray", row=2, col=2, annotation_text=f"Avg PRA: {avg_pra:.1f}")
 
-    fig.update_layout(title_text=f"{player_name} vs {opponent_team} Performance", template="plotly_dark", height=800, width=1200)
+    fig.update_layout(title_text=f"{player_name} vs {opponent_team} Performance (Last {last_n_seasons} Seasons)", 
+                      template="plotly_dark", height=800, width=1200)
     st.plotly_chart(fig)
 
 # Streamlit UI
-st.title("🏀 NBA Player Performance Against Specific Opponent")
+st.title("🏀 NBA Player Performance vs Specific Team (Last 3 Seasons)")
 
 # Get player input
 player_name = st.text_input("Enter player name:", "LeBron James")
@@ -129,11 +142,11 @@ player_name = st.text_input("Enter player name:", "LeBron James")
 opponent_team = st.text_input("Enter opponent team name:", "Golden State Warriors")
 
 # Fetch Data
-df = get_game_logs_against_opponent(player_name, opponent_team, last_n_games=10)
+df = get_game_logs_against_opponent(player_name, opponent_team, last_n_seasons=3)
 
 # Show DataFrame
 if df is not None:
-    st.subheader(f"📊 Last 10 Games vs {opponent_team} - {player_name}")
+    st.subheader(f"📊 Last {len(df)} Games vs {opponent_team} - {player_name}")
     st.dataframe(df[['GAME_DATE', 'MATCHUP', 'LOCATION', 'OPPONENT', 'PTS', 'REB', 'AST']])
 
 # Predict next game
@@ -148,3 +161,4 @@ if predicted_stats:
 
 # Plot Graphs
 plot_performance_graphs(df, player_name, opponent_team)
+
